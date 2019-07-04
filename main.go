@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"controllers"
+	"github.com/go-deploy/controllers"
 
 	"github.com/gorilla/mux"
 )
