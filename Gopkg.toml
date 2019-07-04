@@ -24,6 +24,10 @@
 #   go-tests = true
 #   unused-packages = true
 
+[[override]]
+  name = "github.com/docker/docker"
+  branch = "master"
+  
 [metadata.heroku]
   root-package = "github.com/dbrucewong/go-deploy"
   go-version = "1.12.6"
