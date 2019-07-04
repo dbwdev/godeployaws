@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"./controllers"
+	"controllers"
 
 	"github.com/gorilla/mux"
 )
