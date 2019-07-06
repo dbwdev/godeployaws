@@ -1,71 +1,80 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
-	"os"
-
-	"github.com/gorilla/mux"
-
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
+	"os"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
-
 func main() {
 	router := mux.NewRouter()
-
-	router.HandleFunc("/api/lambda/deploy", DeployLambda).Methods("POST")
+	router.HandleFunc("/lambda/deploy", DeployLambda).Methods("POST")
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8000"
+		port = "80"
 	}
 
-	fmt.Println(port)
-
+	fmt.Println("RUNNING ON " + port)
 	err := http.ListenAndServe(":"+port, router)
 	if err != nil {
 		fmt.Print(err)
 	}
 }
 
-type lambdaStruct struct {
+type Lambda struct {
+	FuncName string
 	FuncDef string
+}
+
+type LambdaReq struct {
+	FuncArr []Lambda
+	YAML string
+}
+
+type Conf struct {
+	AccessKey     string
+	SecretKey     string
+	DefaultRegion string
 }
 
 // DeployLambda deploys lambda to AWS
 var DeployLambda = func(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	var l lambdaStruct
-	err := decoder.Decode(&l)
+	var lr LambdaReq
+	err := decoder.Decode(&lr)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(l.FuncDef)
 
-	ioutil.WriteFile("functions/handler.js", []byte(l.FuncDef), 0666)
+	fmt.Println(lr.YAML)
+	fmt.Println(lr.FuncArr)
+	writeYaml(lr.YAML)
+	writeFunctions(lr.FuncArr)
 
-	conf := getEnvVariables()
-	createNewContainer(conf)
+	// conf := getEnvVariables()
+	// _, err = createNewContainer(conf)
+
+	message(200, "Successfully deployed to AWS lambda")
 }
 
-type awsConf struct {
-	accessKey     string
-	secretKey     string
-	defaultRegion string
+func message(statusCode int, message string) map[string]interface{} {
+	return map[string]interface{}{"status": statusCode, "message": message}
 }
 
-func getEnvVariables() awsConf {
+func getEnvVariables() Conf {
 	if os.Getenv("APP_ENV") != "production" {
 		err := godotenv.Load()
 		if err != nil {
@@ -77,15 +86,48 @@ func getEnvVariables() awsConf {
 	s := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	r := os.Getenv("AWS_DEFAULT_REGION")
 
-	conf := awsConf{accessKey: a, secretKey: s, defaultRegion: r}
+	conf := Conf{AccessKey: a, SecretKey: s, DefaultRegion: r}
 	return conf
 }
 
-func createNewContainer(conf awsConf) (string, error) {
+func writeYaml(yamlStr string) error {
+	return ioutil.WriteFile("template.yml", []byte(yamlStr), 0666)
+}
+
+func writeFunctions(fns []Lambda) {
+		for _, fn := range fns {
+			fmt.Println(fn.FuncName)
+			ioutil.WriteFile(fn.FuncName, []byte(fn.FuncDef), 0666);
+		}
+	}
+// func writeFunctions(lr *LambdaReq) {
+// 	var functions []Lambda
+// 	var functionMap []map[string]interface{}
+
+// 	err := json.Unmarshal([]byte(jsonStr), &functionMap)
+
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	for _, functionData := range functionMap {
+// 		var l Lambda
+// 		l.Name = fmt.Sprintf("%s", functionData["Name"])
+// 		l.Definition = fmt.Sprintf("%s", functionData["Definition"])
+// 		functions = append(functions, l)
+// 	}
+	
+// 	for _, function := range functions {
+// 		var filename = function.Name + ".js"
+// 		ioutil.WriteFile(filename, []byte(function.Definition), 0666)
+// 	}
+// }
+
+func createNewContainer(conf Conf) (string, error) {
+
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	cli.NegotiateAPIVersion(ctx)
-
 	if err != nil {
 		fmt.Println("Unable to create docker client")
 		panic(err)
@@ -116,7 +158,7 @@ func createNewContainer(conf awsConf) (string, error) {
 		&container.Config{
 			Image:        "dbwdev/aws-cli-sam",
 			WorkingDir:   "/usr/app",
-			Env:          []string{"AWS_ACCESS_KEY_ID=" + conf.accessKey, "AWS_SECRET_ACCESS_KEY=" + conf.secretKey, "AWS_DEFAULT_REGION=" + conf.defaultRegion},
+			Env:          []string{"AWS_ACCESS_KEY_ID=" + conf.AccessKey, "AWS_SECRET_ACCESS_KEY=" + conf.SecretKey, "AWS_DEFAULT_REGION=" + conf.DefaultRegion},
 			Cmd:          []string{"/bin/sh", "-c", "sam package --template-file template.yml --s3-bucket sam-test-bucket-aox --output-template-file packaged-template.yaml && sam deploy --region us-east-1 --template-file packaged-template.yaml --stack-name l9-hello --capabilities CAPABILITY_IAM"},
 			Tty:          true,
 			AttachStdout: true,
@@ -125,7 +167,7 @@ func createNewContainer(conf awsConf) (string, error) {
 			Mounts: []mount.Mount{
 				{
 					Type:   mount.TypeBind,
-					Source: "/Users/bruce/Documents/Code/go-docker/functions",
+					Source: "/home/ec2-user/functions",
 					Target: "/usr/app",
 				},
 			},
@@ -161,4 +203,3 @@ func createNewContainer(conf awsConf) (string, error) {
 
 	return resp.ID, nil
 }
-
