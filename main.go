@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -27,7 +28,7 @@ func main() {
 		port = "80"
 	}
 
-	fmt.Println("RUNNING ON " + port)
+	fmt.Println("Running on " + port)
 	err := http.ListenAndServe(":"+port, router)
 	if err != nil {
 		fmt.Print(err)
@@ -64,8 +65,10 @@ var DeployLambda = func(w http.ResponseWriter, r *http.Request) {
 	writeYaml(lr.YAML)
 	writeFunctions(lr.FuncArr)
 
-	// conf := getEnvVariables()
-	// _, err = createNewContainer(conf)
+	conf := getEnvVariables()
+	_, err = createNewContainer(conf)
+
+	removeFunctions("/go/src/github.com/go-deploy/functions")
 
 	message(200, "Successfully deployed to AWS lambda")
 }
@@ -91,40 +94,28 @@ func getEnvVariables() Conf {
 }
 
 func writeYaml(yamlStr string) error {
-	return ioutil.WriteFile("template.yml", []byte(yamlStr), 0666)
+	return ioutil.WriteFile("/go/src/github.com/go-deploy/functions/template.yml", []byte(yamlStr), 0666)
 }
 
 func writeFunctions(fns []Lambda) {
 		for _, fn := range fns {
 			fmt.Println(fn.FuncName)
-			ioutil.WriteFile(fn.FuncName, []byte(fn.FuncDef), 0666);
+			ioutil.WriteFile("/go/src/github.com/go-deploy/functions/"+fn.FuncName, []byte(fn.FuncDef), 0666);
 		}
 	}
-// func writeFunctions(lr *LambdaReq) {
-// 	var functions []Lambda
-// 	var functionMap []map[string]interface{}
 
-// 	err := json.Unmarshal([]byte(jsonStr), &functionMap)
-
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	for _, functionData := range functionMap {
-// 		var l Lambda
-// 		l.Name = fmt.Sprintf("%s", functionData["Name"])
-// 		l.Definition = fmt.Sprintf("%s", functionData["Definition"])
-// 		functions = append(functions, l)
-// 	}
-	
-// 	for _, function := range functions {
-// 		var filename = function.Name + ".js"
-// 		ioutil.WriteFile(filename, []byte(function.Definition), 0666)
-// 	}
-// }
+func removeFunctions(dirName string) {
+	dir, err := ioutil.ReadDir(dirName)
+	if err != nil {
+		log.Fatal("Error removing functions")
+	}
+	for _, d := range dir {
+		fmt.Println("Removing "+d.Name())
+		os.RemoveAll(path.Join([]string{dirName, d.Name()}...))
+	}
+}
 
 func createNewContainer(conf Conf) (string, error) {
-
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	cli.NegotiateAPIVersion(ctx)
