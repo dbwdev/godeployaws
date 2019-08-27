@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
+
 func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/lambda/deploy", DeployLambda).Methods("POST")
@@ -27,22 +28,31 @@ func main() {
 	if port == "" {
 		port = "80"
 	}
+		values := []interface{}{"user", "proj", "proj"}
 
-	fmt.Println("Running on " + port)
+	s := fmt.Sprintf("sam package --template-file template.yml --s3-bucket %s --s3-prefix %s --output-template-file packaged-template.yaml && sam deploy --region us-east-1 --template-file packaged-template.yaml --stack-name %s --capabilities CAPABILITY_IAM", values...)
+	fmt.Println(s)
+
+	fmt.Println("running on " + port)
 	err := http.ListenAndServe(":"+port, router)
 	if err != nil {
 		fmt.Print(err)
 	}
+
+
+
 }
 
 type Lambda struct {
 	FuncName string
-	FuncDef string
+	FuncDef  string
 }
 
 type LambdaReq struct {
+	User string
+	Project string
 	FuncArr []Lambda
-	YAML string
+	YAML    string
 }
 
 type Conf struct {
@@ -62,11 +72,13 @@ var DeployLambda = func(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println(lr.YAML)
 	fmt.Println(lr.FuncArr)
+	fmt.Println(lr.User)
+	fmt.Println(lr.Project)
 	writeYaml(lr.YAML)
 	writeFunctions(lr.FuncArr)
 
 	conf := getEnvVariables()
-	_, err = createNewContainer(conf)
+	_, err = createNewContainer(conf, lr.User, lr. Project)
 
 	removeFunctions("/go/src/github.com/go-deploy/functions")
 
@@ -98,11 +110,11 @@ func writeYaml(yamlStr string) error {
 }
 
 func writeFunctions(fns []Lambda) {
-		for _, fn := range fns {
-			fmt.Println(fn.FuncName)
-			ioutil.WriteFile("/go/src/github.com/go-deploy/functions/"+fn.FuncName, []byte(fn.FuncDef), 0666);
-		}
+	for _, fn := range fns {
+		fmt.Println(fn.FuncName)
+		ioutil.WriteFile("/go/src/github.com/go-deploy/functions/"+fn.FuncName, []byte(fn.FuncDef), 0666)
 	}
+}
 
 func removeFunctions(dirName string) {
 	dir, err := ioutil.ReadDir(dirName)
@@ -110,12 +122,12 @@ func removeFunctions(dirName string) {
 		log.Fatal("Error removing functions")
 	}
 	for _, d := range dir {
-		fmt.Println("Removing "+d.Name())
+		fmt.Println("Removing " + d.Name())
 		os.RemoveAll(path.Join([]string{dirName, d.Name()}...))
 	}
 }
 
-func createNewContainer(conf Conf) (string, error) {
+func createNewContainer(conf Conf, user string, proj string) (string, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	cli.NegotiateAPIVersion(ctx)
@@ -144,13 +156,15 @@ func createNewContainer(conf Conf) (string, error) {
 
 	io.Copy(os.Stdout, reader)
 
+	values := []interface{}{user, proj, proj}
+
 	resp, err := cli.ContainerCreate(
 		ctx,
 		&container.Config{
 			Image:        "dbwdev/aws-cli-sam",
 			WorkingDir:   "/usr/app",
 			Env:          []string{"AWS_ACCESS_KEY_ID=" + conf.AccessKey, "AWS_SECRET_ACCESS_KEY=" + conf.SecretKey, "AWS_DEFAULT_REGION=" + conf.DefaultRegion},
-			Cmd:          []string{"/bin/sh", "-c", "sam package --template-file template.yml --s3-bucket sam-test-bucket-aox --output-template-file packaged-template.yaml && sam deploy --region us-east-1 --template-file packaged-template.yaml --stack-name l9-hello --capabilities CAPABILITY_IAM"},
+			Cmd:          []string{"/bin/sh", "-c", fmt.Sprintf("sam package --template-file template.yml --s3-bucket %s --s3-prefix %s --output-template-file packaged-template.yaml && sam deploy --region us-east-1 --template-file packaged-template.yaml --stack-name %s --capabilities CAPABILITY_IAM", values...)},
 			Tty:          true,
 			AttachStdout: true,
 			AttachStderr: true,
